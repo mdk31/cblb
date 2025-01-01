@@ -6,6 +6,7 @@ causal_blb <- function(data, y_formula, prop_formula, y_method, prop_method, r =
   if(data.table::is.data.table(data) == FALSE){
     data <- as.data.table(data)
   }
+  n <- nrow(data)
   
   if(is.null(b)){
     b <- nrow(data)^0.7
@@ -30,6 +31,7 @@ causal_blb <- function(data, y_formula, prop_formula, y_method, prop_method, r =
                                     trControl = caret::trainControl(method = 'none', classProbs = TRUE),
                                     tuneGrid = prop_tune), prop_args))
   
+
   # Calculate full sample
   # Full sample
   prop_score <- predict(g, type = 'prob')[, 1]
