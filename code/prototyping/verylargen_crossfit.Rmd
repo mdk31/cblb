@@ -1,0 +1,70 @@
+---
+title: "Presentation Results"
+author: "Matt Kosko"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+
+te <- 0.8
+source('/Users/macbookair/Documents/Projects/cblb/code/helper_funcs.R')
+
+homedir <- '/Users/macbookair/Documents/Projects/cblb'
+base_nm <- 'verylargen_crossfit'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'bootstrap.rds'))
+blb_disjoint <- readRDS(file.path(temp_dir, 'crossfit_disjoint_subsets.rds'))
+blb <- readRDS(file.path(temp_dir, 'crossfit.rds'))
+```
+
+```{r}
+cat("Coverage from the full bootstrap")
+print(full[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n')])
+```
+
+```{r}
+message("Coverage from the BLB with cross-fitting (random samples)")
+print(blb[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')])
+```
+
+```{r}
+message("Coverage from the BLB with cross-fitting (disjoint subsets)")
+print(blb_disjoint[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')])
+```
+
+# Timing
+
+```{r}
+replications <- 25
+
+base_nm <- 'verylargen_crossfit_timing'
+dat_path <- 'data'
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'bootstrap.rds'))
+cblb <- readRDS(file.path(temp_dir, 'crossfit_disjoint_subsets.rds'))
+
+full[, `:=`(type = 'Full')]
+cblb[, `:=`(type = paste0('BLB, subsets = ', subsets, ', gamma = ', gamma))]
+cblb[, `:=`(gamma = NULL, subsets = NULL)]
+
+timing <- rbindlist(list(cblb, full))
+```
+
+```{r}
+ggplot(timing, aes(x = type, y = time_elapsed)) +
+  geom_boxplot() +
+  ylab('Time Elapsed (seconds)') +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
