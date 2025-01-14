@@ -126,6 +126,9 @@ cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n')]
 # CROSSFIT----
 hyper_grid <- rbindlist(list(data.table(n = n, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 3, gamma = 0.91),
                         data.table(n = n, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 15, gamma = 0.8),
+                        data.table(n = n, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 3, gamma = 0.9),
+                        data.table(n = n, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 40, gamma = 0.7),
+                        data.table(n = n, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 60, gamma = 0.7),
                         data.table(n = n, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 12, gamma = 0.82),
                         data.table(n = n, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 63, gamma = 0.7)))
 
