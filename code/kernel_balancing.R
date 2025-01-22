@@ -1,12 +1,10 @@
 rm(list = ls())
 
 library(reticulate)
-library(gurobi)
-use_condaenv("r-reticulate")
-#py_install("numpy", pip = TRUE)
-#py_module_available("numpy")
+use_virtualenv("r-reticulate", required = TRUE)
+
 np <- import("numpy")
-source_python("R-examples/gp_simu_gate.py")
+source_python("/Users/macbookair/Documents/Projects/cblb/Archive/gp_simu_gate.py")
 
 #################    ##################################    #################
 #################    ##################################    #################
@@ -294,8 +292,8 @@ kernel_weights <- function(data,degree1,degree2,k1,k2,operator,penal){
   system_time_matrices <- system.time({
     matrix_eva <- as.matrix( confounders )
     # evaluation matrix
-    res.optim2_1$par <-exp(res.optim2_1$gpr$kernel_$theta)
-    res.optim2_0$par <-exp(res.optim2_0$gpr$kernel_$theta)
+    res.optim2_1$par <- exp(res.optim2_1$gpr$kernel_$theta)
+    res.optim2_0$par <- exp(res.optim2_0$gpr$kernel_$theta)
     
     K1 <- res.optim2_1$gpr$kernel_(matrix_eva)
     K0 <- res.optim2_0$gpr$kernel_(matrix_eva)
@@ -358,21 +356,24 @@ kernel_weights <- function(data,degree1,degree2,k1,k2,operator,penal){
   model$sense      <- c("=")
   model$lb <- rep(tol,n)
   model$vtypes <- "C"
-  # Dmat <- Q  # Symmetric positive-definite matrix for the quadratic term
-  # dvec <- c  # Linear coefficients
+  Dmat <- Q  # Symmetric positive-definite matrix for the quadratic term
+  dvec <- c  # Linear coefficients
+  Amat <- t(matrix(c(t1/n, t0/n), nrow = 2, byrow = TRUE))
   # Amat <- rbind(t1/n, t0/n)  # Coefficients for the equality constraints
-  # bvec <- c(1, 1)  # Right-hand side values for the equality constraints
-  # meq <- 2  # N
-  browser()
-  
+  bvec <- c(1, 1)  # Right-hand side values for the equality constraints
+  meq <- 2  # N
+
   params <- list(Presolve=2,OutputFlag=0,QCPDual=0)
   
-  system_time_gurobi <- system.time(res <- tryCatch(gurobi(model,params),error=function(e) NULL))
-  
+  # system_time_gurobi <- system.time(res <- tryCatch(gurobi(model,params),error=function(e) NULL))
+  res <- quadprog::solve.QP(Dmat = Dmat, dvec = dvec, Amat = Amat, bvec = bvec, meq = meq)
+
   # same as AIPW just using the approximated weights instead of 1/p(A|X)
   # res$solution
-  phi0 <- (1-data$A)*res$x*(data$Y - p0) + p0
-  phi1 <- (data$A)*res$x*(data$Y - p1) + p1
+  phi0 <- (1-data$A)*res$solution*(data$Y - p0) + p0
+  phi1 <- (data$A)*res$solution*(data$Y - p1) + p1
+  
+  assertthat::assert_that(length(phi1) != 0)
   
   mp1 <- mean(phi1)
   mp0 <- mean(phi0)
@@ -380,7 +381,7 @@ kernel_weights <- function(data,degree1,degree2,k1,k2,operator,penal){
   ate_akw <-mp1 - mp0
   se_ate_akw <- sqrt(var(phi1-phi0)/nrow(data))
   
-  return(list(weights=res$x,
+  return(list(weights=res$solution,
               mp1=mp1,
               mp0=mp0,
               ate_akw=ate_akw,
@@ -399,7 +400,6 @@ kernel_weights <- function(data,degree1,degree2,k1,k2,operator,penal){
 #################    ##################################    #################
 
 n <- 1000
-itera <- 100
 ate_akw <- se_ate_akw <- ate_kw <- ate_n <- se_ate_n <- se_ate_or <- ate_or <- NULL
 
 #kernel weights parameters
@@ -413,6 +413,7 @@ penal <- log(2) # keep it between 0.1 and log(k) where k is the number of featur
 
 m0 <- m1 <- Y ~ X1 + X2
 
+itera <- 1
 for(i in 1:itera){
   print(i)
   data <- data_generation(n,1)

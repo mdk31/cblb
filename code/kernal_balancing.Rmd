@@ -1,0 +1,48 @@
+---
+title: "Presentation Results"
+author: "Matt Kosko"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+
+source('/Users/macbookair/Documents/Projects/cblb/code/helper_funcs.R')
+homedir <- '/Users/macbookair/Documents/Projects/cblb'
+
+te <- 0.8
+sigma <- 1
+degree1 <- 1
+degree2 <- 1
+k1 <- "poly"
+k2 <- "poly"
+operator <- "single" # here i'm considering a simple linear kernel just for comparison/true model
+penal <- log(2) # keep it between 0.1 and log(k) where k is the number of features
+
+base_nm <- 'kernel_balancing'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'bootstrap.rds'))
+blb_disjoint <- readRDS(file.path(temp_dir, 'disjoint_subsets.rds'))
+```
+
+```{r}
+cat("Coverage from the full bootstrap")
+print(full[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n')])
+```
+
+
+```{r}
+message("Coverage from the BLB with cross-fitting (disjoint subsets)")
+print(blb_disjoint[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')])
+```
+
