@@ -169,7 +169,7 @@ source('code/helper_funcs.R')
 
 te <- 0.8
 sigma <- 1
-replications <- 1000
+replications <- 25
 degree1 <- 1
 degree2 <- 1
 k1 <- "poly"
@@ -177,7 +177,7 @@ k2 <- "poly"
 operator <- "single" # here i'm considering a simple linear kernel just for comparison/true model
 penal <- log(2) # keep it between 0.1 and log(k) where k is the number of features
 
-base_nm <- 'aipw_kernel_balancing'
+base_nm <- 'aipw_kernel_balancing_timing'
 image_path <- 'images'
 dat_path <- 'data'
 
@@ -192,7 +192,7 @@ if(!file.exists(img_tmp_dir)){
   dir.create(img_tmp_dir, recursive = TRUE)
 }
 
-hyper_grid <- as.data.table(expand.grid(n = c(1000),
+hyper_grid <- as.data.table(expand.grid(n = c(1000, 10000),
                                         B = c(100),
                                         prop_form = c('correct'),
                                         out_form = c('correct')))
@@ -224,27 +224,26 @@ if(file.exists(file.path(temp_dir, 'bootstrap.rds'))){
       set.seed(rp)
       dat <- kangschafer3(n = n, te = te, sigma = sigma, beta_overlap = 0.5)
       idx <- seq_len(n)
-      output <- kernel_weights(dat,degree1,degree2,k1,k2,operator,penal)
-      phi1 <- output$phi1
-      phi0 <- output$phi0
-      mp1 <- mean(phi1)
-      mp0 <- mean(phi0)
-      ate_akw <- mp1 - mp0
-      se_ate_akw <- sqrt(var(phi1-phi0)/nrow(dat))
-      M <- rmultinom(n = B, size = n, prob = rep(1, n))
-      
-      blb_reps <- sapply(seq_len(B), function(bt){
-        boot_phi1 <- M[, bt]*phi1
-        boot_phi0 <- M[, bt]*phi0
-        mean(boot_phi1) - mean(boot_phi0)
+      time <- system.time({
+        output <- kernel_weights(dat,degree1,degree2,k1,k2,operator,penal)
+        phi1 <- output$phi1
+        phi0 <- output$phi0
+        mp1 <- mean(phi1)
+        mp0 <- mean(phi0)
+        ate_akw <- mp1 - mp0
+        se_ate_akw <- sqrt(var(phi1-phi0)/nrow(dat))
+        M <- rmultinom(n = B, size = n, prob = rep(1, n))
+        
+        blb_reps <- sapply(seq_len(B), function(bt){
+          boot_phi1 <- M[, bt]*phi1
+          boot_phi0 <- M[, bt]*phi0
+          mean(boot_phi1) - mean(boot_phi0)
+        })
+        
+        perc_ci <- boot:::perc.ci(blb_reps)
       })
 
-      perc_ci <- boot:::perc.ci(blb_reps)
-      return(data.table(lower_ci = c(perc_ci[4], ate_akw - qnorm(0.975)*se_ate_akw),
-                        upper_ci = c(perc_ci[5], ate_akw + qnorm(0.975)*se_ate_akw),
-                        type = c('Percentile', 'Wald'),
-                        estim = c(mean(blb_reps), ate_akw),
-                        se = c(sd(blb_reps), se_ate_akw)))
+      data.table(time_elapsed = time['elapsed'])
       }, cl = 1)
 
     out <- rbindlist(out)
@@ -258,13 +257,15 @@ if(file.exists(file.path(temp_dir, 'bootstrap.rds'))){
   saveRDS(cblb, file.path(temp_dir, 'bootstrap.rds'))
 }
 
-cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'type')]
+# cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'type')]
+
 
 
 # DISJOINT----
 hyper_grid <- rbindlist(list(data.table(n = 10000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 10, gamma = 0.75),
                              data.table(n = 10000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 15, gamma = 0.70597),
-                             data.table(n = 10000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 20, gamma = 0.67474)))
+                             data.table(n = 10000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 20, gamma = 0.67474),
+                             data.table(n = 1000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 4, gamma = 0.79)))
 
 seq_row <- seq_len(nrow(hyper_grid))
 
@@ -295,36 +296,39 @@ if(file.exists(file.path(temp_dir, 'disjoint_subsets.rds'))){
     out <- pblapply(seq_len(replications), function(rp){
       set.seed(rp)
       dat <- kangschafer3(n = n, te = te, sigma = sigma, beta_overlap = 0.5)
-      partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
-      
-      blb_out <- lapply(partitions, function(i){
-        tmp_dat <- dat[i]
-        output <- kernel_weights(tmp_dat,degree1,degree2,k1,k2,operator,penal)
-        phi1 <- output$phi1
-        phi0 <- output$phi0
-        M <- rmultinom(n = B, size = n, prob = rep(1, b))
+      time <- system.time({
+        partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
         
-        blb_reps <- sapply(seq_len(B), function(bt){
-          boot_phi1 <- M[, bt]*phi1
-          boot_phi0 <- M[, bt]*phi0
-          sum(boot_phi1)/n - sum(boot_phi0)/n
+        blb_out <- lapply(partitions, function(i){
+          tmp_dat <- dat[i]
+          output <- kernel_weights(tmp_dat,degree1,degree2,k1,k2,operator,penal)
+          phi1 <- output$phi1
+          phi0 <- output$phi0
+          M <- rmultinom(n = B, size = n, prob = rep(1, b))
+          
+          blb_reps <- sapply(seq_len(B), function(bt){
+            boot_phi1 <- M[, bt]*phi1
+            boot_phi0 <- M[, bt]*phi0
+            sum(boot_phi1)/n - sum(boot_phi0)/n
+          })
+          
+          
+          perc_ci <- boot:::perc.ci(blb_reps)
+          return(data.table(lower_ci = perc_ci[4],
+                            upper_ci = perc_ci[5],
+                            estim = mean(blb_reps),
+                            se = sd(blb_reps)))
         })
-
-
-        perc_ci <- boot:::perc.ci(blb_reps)
-        return(data.table(lower_ci = perc_ci[4],
-                          upper_ci = perc_ci[5],
-                          estim = mean(blb_reps),
-                          se = sd(blb_reps)))
+        
+        
+        blb_out <- rbindlist(blb_out)
+        blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
+                               upper_ci = mean(upper_ci),
+                               estim = mean(estim),
+                               se = mean(se))]
+        
       })
-      
-      
-      blb_out <- rbindlist(blb_out)
-      blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
-                             upper_ci = mean(upper_ci),
-                             estim = mean(estim),
-                             se = mean(se))]
-      blb_out
+      data.table(time_elapsed = time['elapsed'])
     }, cl = 1)
     
     out <- rbindlist(out)
@@ -340,7 +344,7 @@ if(file.exists(file.path(temp_dir, 'disjoint_subsets.rds'))){
   saveRDS(cblb, file.path(temp_dir, 'disjoint_subsets.rds'))
 }
 
-cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')]
+# cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')]
 
 
 

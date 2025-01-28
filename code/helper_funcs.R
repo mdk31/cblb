@@ -1,4 +1,9 @@
 
+calculate_gamma <- function(n, subsets){
+  soln <- 1 - log(subsets)/log(n)
+  return(truncate_to_n(soln, 5))
+}
+
 causal_blb <- function(data, y_formula, prop_formula, y_method, prop_method, r = 100, 
                        subsets = 5, b = NULL, m_tune = NULL, prop_tune = NULL,
                        y_args = NULL, prop_args = NULL, cores = 1){
@@ -133,3 +138,11 @@ make_partition <- function(n, subsets, b, disjoint = FALSE){
   }
   partition
 }
+
+truncate_to_n <- function(number, n) {
+  factor <- 10^n
+  truncated <- trunc(number * factor) / factor
+  return(truncated)
+}
+
+

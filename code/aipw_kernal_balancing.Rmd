@@ -32,6 +32,8 @@ dat_path <- 'data'
 temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
 
 full <- readRDS(file.path(temp_dir, 'bootstrap.rds'))
+cblb <- readRDS(file.path(temp_dir, 'disjoint_subsets.rds'))
+
 ```
 
 ```{r}
@@ -39,4 +41,43 @@ cat("Coverage from the full bootstrap and Wald interval")
 full[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'type')]
 ```
 
+```{r}
+cat("Coverage from the BLB")
+cblb[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')]
+```
+
+# Timing
+
+
+```{r}
+replications <- 25
+
+base_nm <- 'aipw_kernel_balancing_timing'
+dat_path <- 'data'
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'bootstrap.rds'))
+cblb <- readRDS(file.path(temp_dir, 'disjoint_subsets.rds'))
+
+full[, `:=`(type = paste0('Full'))]
+cblb[, `:=`(type = paste0('BLB, subsets = ', subsets, ', gamma = ', gamma))]
+cblb[, `:=`(gamma = NULL, subsets = NULL)]
+
+timing <- rbindlist(list(cblb, full))
+```
+
+```{r}
+n <- c(1000, 10000)
+for(i in n){
+  filt <- timing[n == i]
+  p <- ggplot(filt, aes(x = type, y = time_elapsed)) +
+  geom_boxplot() +
+  ggtitle(paste0('n = ', i)) +
+  ylab('Time Elapsed (seconds)') +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+  
+  print(p)
+}
+
+```
 
