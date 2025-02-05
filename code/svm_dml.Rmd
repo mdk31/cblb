@@ -1,0 +1,77 @@
+---
+title: "SVM DML"
+author: "Matt Kosko"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+
+source('/Users/macbookair/Documents/Projects/cblb/code/helper_funcs.R')
+homedir <- '/Users/macbookair/Documents/Projects/cblb'
+
+te <- 0.8
+sigma <- 1
+
+base_nm <- 'svm_dml'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+# full <- readRDS(file.path(temp_dir, 'full_coverage.rds'))
+cblb <- readRDS(file.path(temp_dir, 'coverage.rds'))
+
+```
+
+<!-- ```{r} -->
+<!-- cat("Coverage from the full bootstrap") -->
+<!-- full[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n')] -->
+<!-- ``` -->
+
+```{r}
+cat("Coverage from the BLB")
+cblb[, .(coverage = mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'B')]
+```
+
+# Timing
+
+
+```{r}
+replications <- 25
+
+base_nm <- 'svm_dml_timing'
+dat_path <- 'data'
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'full_timing.rds'))
+cblb <- readRDS(file.path(temp_dir, 'timing.rds'))
+
+full[, `:=`(type = paste0('Full'))]
+cblb[, `:=`(type = paste0('BLB, subsets = ', subsets, ', gamma = ', gamma))]
+cblb[, `:=`(gamma = NULL, subsets = NULL)]
+
+timing <- rbindlist(list(cblb, full))
+```
+
+```{r}
+n <- c(10000, 50000)
+for(i in n){
+  filt <- timing[n == i]
+  p <- ggplot(filt, aes(x = type, y = time_elapsed)) +
+  geom_boxplot() +
+  ggtitle(paste0('n = ', i)) +
+  ylab('Time Elapsed (seconds)') +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+  
+  print(p)
+}
+
+```
+

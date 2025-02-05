@@ -26,7 +26,7 @@ if(!file.exists(img_tmp_dir)){
   dir.create(img_tmp_dir, recursive = TRUE)
 }
 
-hyper_grid <- as.data.table(expand.grid(n = c(10000, 50000),
+hyper_grid <- as.data.table(expand.grid(n = c(10000),
                                         B = c(100)))
 
 seq_row <- seq_len(nrow(hyper_grid))
@@ -39,7 +39,6 @@ if(file.exists(file.path(temp_dir, 'full_coverage.rds'))){
   cblb <- lapply(seq_row, function(i){
     grid_val <- hyper_grid[i]
     n <- grid_val$n
-    part_idx <- seq_len(b)
     B <- grid_val$B
     subsets <- grid_val$subsets
 
@@ -71,7 +70,6 @@ if(file.exists(file.path(temp_dir, 'full_coverage.rds'))){
         test_dat
       })
       crossfit <- rbindlist(crossfit)
-
       M <- rmultinom(n = B, size = n, prob = rep(1, n))
       
       boot_reps <- sapply(seq_len(B), function(bt){
@@ -81,13 +79,13 @@ if(file.exists(file.path(temp_dir, 'full_coverage.rds'))){
         })
       
       boot_ci <- boot:::perc.ci((boot_reps))
-      blb_out <- blb_out[, .(lower_ci = boot_ci[4],
+      blb_out <- data.table(lower_ci = boot_ci[4],
                              upper_ci = boot_ci[5],
                              estim = mean(boot_reps),
-                             se = mean(boot_reps))]
+                             se = mean(boot_reps))
       blb_out
     }, cl = 4)
-    
+
     out <- rbindlist(out)
     out[, `:=`(n = n,
                B = B)]
@@ -97,11 +95,16 @@ if(file.exists(file.path(temp_dir, 'full_coverage.rds'))){
   saveRDS(cblb, file.path(temp_dir, 'full_coverage.rds'))
 }
 
+cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n')]
+
+
 
 # CBLB SIMULATIONS----
-hyper_grid <- as.data.table(expand.grid(n = c(10000, 50000),
-                                        subsets = c(2, 5, 10),
+hyper_grid <- as.data.table(expand.grid(n = c(10000),
+                                        subsets = c(5, 10, 15),
                                         B = c(100)))
+hyper_grid <- rbindlist(list(hyper_grid,
+                             data.table(n = 50000, subsets = 50, B = 100)))
 hyper_grid[, `:=`(gamma = calculate_gamma(n, subsets))]
 seq_row <- seq_len(nrow(hyper_grid))
 
@@ -112,19 +115,18 @@ if(file.exists(file.path(temp_dir, 'coverage.rds'))){
     grid_val <- hyper_grid[i]
     n <- grid_val$n
     gamma <- grid_val$gamma
-    b <- round(n^gamma)
-    part_idx <- seq_len(b)
+    b <- floor(n^gamma)
+    idx <- seq_len(b)
     B <- grid_val$B
     subsets <- grid_val$subsets
     
     out <- pblapply(seq_len(replications), function(rp){
       set.seed(rp)
       dat <- kangschafer3(n = n, te = te, sigma = sigma, beta_overlap = 0.5)
-      partitions <- make_partition(n = n, subsets = subsets, b = round(n^gamma), disjoint = FALSE)
+      partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
       
       blb_out <- lapply(partitions, function(i){
         tmp_dat <- dat[i]
-        idx <- seq_len(nrow(tmp_dat))
         folds <- split(idx, sample(rep(1:K, length.out = length(idx))))
         crossfit <- lapply(folds, function(test_idx){
           train_idx <- setdiff(idx, test_idx)
@@ -162,7 +164,6 @@ if(file.exists(file.path(temp_dir, 'coverage.rds'))){
                           estim = mean(blb_reps),
                           se = sd(blb_reps)))
       })
-
       
       blb_out <- rbindlist(blb_out)
       blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
@@ -171,13 +172,11 @@ if(file.exists(file.path(temp_dir, 'coverage.rds'))){
                              se = mean(se))]
       blb_out
     }, cl = 4)
-    
+
     out <- rbindlist(out)
     out[, `:=`(n = n,
                gamma = gamma,
                subsets = subsets,
-               prop_form = prop_form,
-               out_form = out_form,
                B = B)]
     out
   })
@@ -185,6 +184,7 @@ if(file.exists(file.path(temp_dir, 'coverage.rds'))){
   saveRDS(cblb, file.path(temp_dir, 'coverage.rds'))
 }
 
+cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets')]
 
 # COVERAGE----
 zip <- copy(cblb)

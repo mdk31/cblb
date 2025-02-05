@@ -97,6 +97,85 @@ causal_blb <- function(data, y_formula, prop_formula, y_method, prop_method, r =
   blb_out
 }
 
+
+continuous_treatment_sim <- function(n, sigma = 1, beta_overlap = 0.5){
+  X1 <- rnorm(n, 0, 1)
+  X2 <- rnorm(n, 0, 1)
+  exposure <- X1 + X2 + rnorm(n, 0, 1)
+  
+  y  <- exposure*0.75 + 1.5*X1 + 1.125*X2 + rnorm(n, 0, sigma)
+  out <- cbind(y, exposure, X1, X2)
+  out <- as.data.frame(out)
+  return(out)
+  
+}
+
+estimate_models <- function(data, a.vals){
+
+  # Construct data for predictions
+  la.new <- rbind(cbind(data[, c("X1", "X2")], exposure = data$exposure),
+                  cbind(data[rep(1:nrow(data), length(a.vals)), c("X1", "X2")], 
+                        exposure  = rep(a.vals, rep(nrow(data), length(a.vals)))))
+  
+  l.new <- la.new[, -3]
+  
+  # Fit models
+  pimod <- lm(exposure ~ X1 + X2, data = data)
+  pimod.vals <- predict(pimod, newdata = l.new)
+  sq.res <- (data$exposure - pimod.vals[1:nrow(data)])^2
+  
+  pi2mod <- glm(sq.res ~ X1 + X2, data = data, family = gaussian(link = "log"))
+  pi2mod.vals <-  predict(pi2mod, newdata = l.new, type = "response")
+  
+  mumod <- lm(y ~ exposure + X1 + X2, data = data)
+  muhat.vals <- predict(mumod, newdata = la.new, type = "response")
+  
+  # Compute standardized residuals
+  a.std <- (la.new$exposure - pimod.vals) / sqrt(pi2mod.vals)
+  
+  # Kernel density estimation for pihat 
+  approx.fn <- function(x, y, z) { predict(smooth.spline(x, y), x = z)$y }
+  pihat.vals <- approx.fn(density(a.std[1:nrow(data)])$x, density(a.std[1:nrow(data)])$y, a.std)
+  pihat <- pihat.vals[1:nrow(data)]
+  
+  pihat.mat <- matrix(pihat.vals[-(1:nrow(data))], nrow = nrow(data), ncol = length(a.vals))
+  varpihat <- approx.fn(a.vals, apply(pihat.mat, 2, mean), data$exposure)
+  varpihat.mat <- matrix(rep(apply(pihat.mat, 2, mean), nrow(data)), byrow = TRUE, nrow = nrow(data))
+  
+  muhat <- muhat.vals[1:nrow(data)]
+  muhat.mat <- matrix(muhat.vals[-(1:nrow(data))], nrow = nrow(data), ncol = length(a.vals))
+  mhat <- approx.fn(a.vals, apply(muhat.mat, 2, mean), data$exposure)
+  mhat.mat <- matrix(rep(apply(muhat.mat, 2, mean), nrow(data)), byrow = TRUE, nrow = nrow(data))
+  
+  # Compute pseudo outcome
+  pseudo.out <- (data$y - muhat) / (pihat / varpihat) + mhat
+  
+  # Select bandwidth via cross-validation
+  kern <- function(x) { dnorm(x) }
+  w.fn <- function(bw) {
+    w.avals <- NULL
+    for (a.val in a.vals) {
+      a.std <- (data$exposure - a.val) / bw
+      kern.std <- kern(a.std) / bw
+      w.avals <- c(w.avals, mean(a.std^2 * kern.std) * (kern(0) / bw) /
+                     (mean(kern.std) * mean(a.std^2 * kern.std) - mean(a.std * kern.std)^2))
+    }
+    return(w.avals / nrow(data))
+  }
+  hatvals <- function(bw) { approx(a.vals, w.fn(bw), xout = data$exposure)$y }
+  cts.eff <- function(out, bw) { 
+    approx(locpoly(data$exposure, out, bandwidth = bw), xout = data$exposure)$y }
+  
+  h.opt <- optimize(function(h) {
+    hats <- hatvals(h)
+    mean(((pseudo.out - cts.eff(pseudo.out, bw = h)) / (1 - hats))^2)
+  }, c(0.01, 50), tol = 0.01)$minimum
+  
+  # Final effect estimate
+  # est <- approx(locpoly(data$exposure, pseudo.out, bandwidth = h.opt), xout = a.vals)$y
+  return(list(pseudo.out = pseudo.out, bandwidth = h.opt))
+}
+
 inv_logit <- function(x){
   1/(1 + exp(-x))
 }
