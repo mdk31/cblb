@@ -137,3 +137,11 @@ if(file.exists(file.path(temp_dir, 'blb_timing.rds'))){
 
 full <- readRDS(file.path(temp_dir, 'full_timing.rds'))
 cblb <- readRDS(file.path(temp_dir, 'blb_timing.rds'))
+
+cblb[, `:=`(type = paste0('BLB, subsets = ', subsets, ', gamma = ', gamma),
+            gamma = NULL,
+            subsets = NULL)]
+full[, `:=`(type = 'Full')]
+timing <- rbindlist(list(full, cblb))
+
+for(i in c(1000, 50000))
