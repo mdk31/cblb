@@ -98,6 +98,23 @@ causal_blb <- function(data, y_formula, prop_formula, y_method, prop_method, r =
 }
 
 
+rkhs_sim <- function(n, beta_overlap = 0.5){
+  X <- mvtnorm::rmvnorm(n, mean = rep(0, 3))
+  
+  V <- X[, 1]
+  
+  nu <- rnorm(n, mean = 0, sd = 1)
+  epsilon <- rnorm(n, mean = 0, sd = 1)
+  D <- pnorm(3 * X %*% rep(beta_overlap, 3)) + 0.75*nu
+  
+  # Generate outcome Y
+  Y <- 1.2*D + 0.9*(X %*% c(0.1, 0.05, 0.01)) + D * X[, 1] + epsilon
+  out <- as.data.frame(cbind(Y, D, X))
+  names(out) <- c('Y', 'D', 'V', 'X1', 'X2')
+  return(out)
+}
+
+
 continuous_treatment_sim <- function(n, sigma = 1, beta_overlap = 0.5){
   X1 <- rnorm(n, 0, 1)
   X2 <- rnorm(n, 0, 1)
