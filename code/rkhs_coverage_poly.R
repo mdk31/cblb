@@ -32,13 +32,10 @@ d_vals <- seq(-0.5, 0.5, length.out = 10)
 v <- 0
 true_dr <- 1.2*d_vals
 
-full_lambda_1 <- 0.0004291934
-full_lambda_2 <- 0.001757511
-
 replications <- 1000
 r <- 100
 
-base_nm <- 'rkhs_coverage'
+base_nm <- 'rkhs_coverage_poly'
 image_path <- 'images'
 dat_path <- 'data'
 
@@ -53,7 +50,7 @@ if(!file.exists(img_tmp_dir)){
   dir.create(img_tmp_dir, recursive = TRUE)
 }
 
-hyper_grid <- as.data.table(expand.grid(n = c(100),
+hyper_grid <- as.data.table(expand.grid(n = c(1000),
                                         B = c(100)))
 
 seq_row <- seq_len(nrow(hyper_grid))
@@ -71,11 +68,10 @@ if(file.exists(file.path(temp_dir, 'full_coverage.rds'))){
     out <- pblapply(seq_len(replications), function(rp){
       set.seed(rp)
       dat <- rkhs_sim(n = n)
-      rbf <- kernlab::rbfdot()
+      rbf <- kernlab::polydot()
       
       K_DD <- kernlab::kernelMatrix(rbf, as.matrix(dat[, c('D')]))
       K_VV <- kernlab::kernelMatrix(rbf, as.matrix(dat[, c('V')]))
-      browser()
       K_XX <- kernlab::kernelMatrix(rbf, as.matrix(dat[, c('X1', 'X2')]))
       K_Dd <-
         kernlab::kernelMatrix(rbf, as.matrix(dat[, c('D')]), as.matrix(d_vals))
@@ -106,7 +102,7 @@ if(file.exists(file.path(temp_dir, 'full_coverage.rds'))){
         true_dr = true_dr
       ))
       
-    }, cl = 1) 
+    }, cl = 5) 
     out <- rbindlist(out)
     out[, `:=`(n = n,
                B = B)]
@@ -139,7 +135,7 @@ if(file.exists(file.path(temp_dir, 'blb_coverage_baseline.rds'))){
     out <- pblapply(seq_len(replications), function(rp){
       set.seed(rp)
       dat <- rkhs_sim(n = n)
-      rbf <- kernlab::rbfdot()
+      rbf <- kernlab::polydot()
       partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
       blb_out <- lapply(partitions, function(i){
         tmp_dat <- dat[i, ]
@@ -150,14 +146,14 @@ if(file.exists(file.path(temp_dir, 'blb_coverage_baseline.rds'))){
         K_Dd <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('D')]), as.matrix(d_vals))
         K_Vv <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('V')]), as.matrix(rep(v, length(d_vals))))
         
-        # lambda_values <- 10^seq(-3, 3, length.out = 10)
-        # gcv_gamma <- compute_gcv(tmp_dat$Y, K_DD*K_VV*K_XX, lambda_values)
-        # lambda_1 <- lambda_values[which.min(gcv_gamma)]
-        # 
-        # gcv_mu_x <- compute_gcv(K_VV, K_XX, lambda_values)
-        # lambda_2 <- lambda_values[which.min(gcv_mu_x)]
-        first_inverse <- solve(K_DD * K_VV * K_XX + b * 0.00001 * diag(b))
-        second_inverse <- solve(K_VV + b * 0.00001 * diag(b))
+        lambda_values <- 10^seq(-3, 3, length.out = 10)
+        gcv_gamma <- compute_gcv(tmp_dat$Y, K_DD*K_VV*K_XX, lambda_values)
+        lambda_1 <- lambda_values[which.min(gcv_gamma)]
+
+        gcv_mu_x <- compute_gcv(K_VV, K_XX, lambda_values)
+        lambda_2 <- lambda_values[which.min(gcv_mu_x)]
+        first_inverse <- solve(K_DD * K_VV * K_XX + b * lambda_1 * diag(b))
+        second_inverse <- solve(K_VV + b * lambda_2 * diag(b))
         
         M <- rmultinom(B, size = n, prob = rep(1, b))
         blb_reps <- lapply(1:B, function(bt){
@@ -175,7 +171,7 @@ if(file.exists(file.path(temp_dir, 'blb_coverage_baseline.rds'))){
       blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
                              upper_ci = mean(upper_ci)), by = c('true_dr', 'tr_vals')]     
       
-    }, cl = 1)
+    }, cl = 5)
     
     out <- rbindlist(out)
     out[, `:=`(n = n,
@@ -189,262 +185,5 @@ if(file.exists(file.path(temp_dir, 'blb_coverage_baseline.rds'))){
 }
 
 cblb[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'subsets', 'gamma')]
-
-
-# CBLB REWEIGHTING----
-hyper_grid <- as.data.table(expand.grid(n = c(1000),
-                                        subsets = c(10),
-                                        B = c(100)))
-hyper_grid[, `:=`(gamma = calculate_gamma(n, subsets))]
-seq_row <- seq_len(nrow(hyper_grid))
-
-if(file.exists(file.path(temp_dir, 'blb_coverage.rds'))){
-  cblb <- readRDS(file.path(temp_dir, 'blb_coverage.rds'))
-} else{
-  cblb <- lapply(seq_row, function(i){
-    grid_val <- hyper_grid[i]
-    n <- grid_val$n
-    gamma <- grid_val$gamma
-    b <- floor(n^gamma)
-    part_idx <- seq_len(b)
-    B <- grid_val$B
-    subsets <- grid_val$subsets
-    
-    out <- pblapply(seq_len(replications), function(rp){
-      set.seed(rp)
-      dat <- rkhs_sim(n = n)
-      rbf <- kernlab::rbfdot()
-      partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
-      blb_out <- lapply(partitions, function(i){
-        tmp_dat <- dat[i, ]
-        
-        K_DD <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('D')]))
-        K_VV <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('V')]))
-        K_XX <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('X1', 'X2')]))
-        K_Dd <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('D')]), as.matrix(d_vals))
-        K_Vv <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('V')]), as.matrix(rep(v, length(d_vals))))
-        
-        lambda_values <- 10^seq(-3, 3, length.out = 10)
-        gcv_gamma <- compute_gcv(tmp_dat$Y, K_DD*K_VV*K_XX, lambda_values)
-        lambda_1 <- lambda_values[which.min(gcv_gamma)]
-        
-        gcv_mu_x <- compute_gcv(K_VV, K_XX, lambda_values)
-        lambda_2 <- lambda_values[which.min(gcv_mu_x)]
-        
-        M <- rmultinom(B, size = n, prob = rep(1, b))
-        blb_reps <- lapply(1:B, function(bt){
-          W <- M[, bt]
-          W_sqrt <- sqrt(W)
-          W_diag <- diag(W_sqrt)
-          Y_w <- W*tmp_dat$Y
-          K_DD_w <- W_diag %*% K_DD %*% W_diag
-          K_VV_w <- W_diag %*% K_VV %*% W_diag
-          K_XX_w <- W_diag %*% K_XX %*% W_diag
-          # K_Dd_w <- W_diag %*% K_Dd %*% W_diag
-          # K_Vv_w <- W_diag %*% K_Vv %*% W_diag
-          
-          first_inverse_w <- solve(K_DD_w*K_VV_w*K_XX_w + n*lambda_1*diag(b))
-          second_inverse_w <- solve(K_VV_w + n*lambda_2*diag(b))
-          t(Y_w) %*% (first_inverse_w) %*% (K_Dd*K_Vv*(K_XX_w %*% second_inverse_w) %*% K_Vv)
-        })
-        blb_reps <- do.call(rbind, blb_reps)
-        
-        perc_ci <- apply(blb_reps, 2, boot:::perc.ci)
-        return(data.table(lower_ci = perc_ci[4, ],
-                          upper_ci = perc_ci[5, ],
-                          tr_vals = d_vals,
-                          true_dr = true_dr))
-      })
-      blb_out <- rbindlist(blb_out)
-      blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
-                             upper_ci = mean(upper_ci)), by = c('true_dr', 'tr_vals')]     
-
-    }, cl = 5)
-    
-    out <- rbindlist(out)
-    out[, `:=`(n = n,
-               gamma = gamma,
-               subsets = subsets,
-               B = B)]
-    out
-  })
-  cblb <- rbindlist(cblb)
-  saveRDS(cblb, file.path(temp_dir, 'blb_coverage.rds'))
-}
-
-cblb[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'subsets', 'gamma')]
-
-
-# CBLB REWEIGHTING SCALE----
-# hyper_grid <- as.data.table(expand.grid(n = c(1000, 50000),
-#                                         subsets = c(1),
-#                                         B = c(100)))
-hyper_grid <- data.table(n = c(1000, 1000),
-                         subsets = c(5, 10),
-                         B = 100)
-hyper_grid[, `:=`(gamma = calculate_gamma(n, subsets))]
-seq_row <- seq_len(nrow(hyper_grid))
-
-if(file.exists(file.path(temp_dir, 'blb_coverage_rescale.rds'))){
-  cblb <- readRDS(file.path(temp_dir, 'blb_coverage_rescale.rds'))
-} else{
-  cblb <- lapply(seq_row, function(i){
-    grid_val <- hyper_grid[i]
-    n <- grid_val$n
-    gamma <- grid_val$gamma
-    b <- floor(n^gamma)
-    part_idx <- seq_len(b)
-    B <- grid_val$B
-    subsets <- grid_val$subsets
-    
-    out <- pblapply(seq_len(replications), function(rp){
-      set.seed(rp)
-      dat <- rkhs_sim(n = n)
-      rbf <- kernlab::rbfdot()
-      partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
-      blb_out <- lapply(partitions, function(i){
-        tmp_dat <- dat[i, ]
-        
-        K_DD <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('D')]))
-        K_VV <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('V')]))
-        K_XX <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('X1', 'X2')]))
-        K_Dd <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('D')]), as.matrix(d_vals))
-        K_Vv <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('V')]), as.matrix(rep(v, length(d_vals))))
-        
-        lambda_values <- 10^seq(-3, 3, length.out = 10)
-        gcv_gamma <- compute_gcv(tmp_dat$Y, K_DD*K_VV*K_XX, lambda_values)
-        lambda_1 <- lambda_values[which.min(gcv_gamma)]
-        
-        gcv_mu_x <- compute_gcv(K_VV, K_XX, lambda_values)
-        lambda_2 <- lambda_values[which.min(gcv_mu_x)]
-        
-        M <- rmultinom(B, size = n, prob = rep(1, b))
-        blb_reps <- lapply(1:B, function(bt){
-          W <- M[, bt]
-          W_sqrt <- sqrt(W)
-          W_diag <- diag(W_sqrt)
-          Y_w <- W*tmp_dat$Y
-          K_DD_w <- W_diag %*% K_DD %*% W_diag
-          K_VV_w <- W_diag %*% K_VV %*% W_diag
-          K_XX_w <- W_diag %*% K_XX %*% W_diag
-          # K_Dd_w <- apply(K_Dd, 2, function(x) x*W)
-          # K_Vv_w <- apply(K_Dd, 2, function(x) x*W)
-
-          first_inverse_w <- solve(K_DD_w*K_VV_w*K_XX_w + n*(b/n)*lambda_1*diag(b))
-          second_inverse_w <- solve(K_VV_w + n*(b/n)*lambda_2*diag(b))
-          t(Y_w) %*% (first_inverse_w) %*% (K_Dd*K_Vv*(K_XX_w %*% second_inverse_w) %*% K_Vv)
-        })
-        blb_reps <- do.call(rbind, blb_reps)
-        
-        perc_ci <- apply(blb_reps, 2, boot:::perc.ci)
-        return(data.table(lower_ci = perc_ci[4, ],
-                          upper_ci = perc_ci[5, ],
-                          tr_vals = d_vals,
-                          true_dr = true_dr))
-      })
-      blb_out <- rbindlist(blb_out)
-      blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
-                             upper_ci = mean(upper_ci)), by = c('true_dr', 'tr_vals')]     
-      
-    }, cl = 5)
-    
-    out <- rbindlist(out)
-    out[, `:=`(n = n,
-               gamma = gamma,
-               subsets = subsets,
-               B = B)]
-    out
-  })
-  cblb <- rbindlist(cblb)
-  saveRDS(cblb, file.path(temp_dir, 'blb_coverage_rescale.rds'))
-}
-
-cblb[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'subsets', 'gamma')]
-
-
-
-# CBLB REWEIGHTING FULL LAMBDA----
-hyper_grid <- as.data.table(expand.grid(n = c(1000),
-                                        subsets = c(10),
-                                        B = c(100)))
-hyper_grid[, `:=`(gamma = calculate_gamma(n, subsets))]
-seq_row <- seq_len(nrow(hyper_grid))
-
-if(file.exists(file.path(temp_dir, 'blb_coverage_fulllambda.rds'))){
-  cblb <- readRDS(file.path(temp_dir, 'blb_coverage_fulllambda.rds'))
-} else{
-  cblb <- lapply(seq_row, function(i){
-    grid_val <- hyper_grid[i]
-    n <- grid_val$n
-    gamma <- grid_val$gamma
-    b <- floor(n^gamma)
-    part_idx <- seq_len(b)
-    B <- grid_val$B
-    subsets <- grid_val$subsets
-    
-    out <- pblapply(seq_len(replications), function(rp){
-      set.seed(rp)
-      dat <- rkhs_sim(n = n)
-      rbf <- kernlab::rbfdot()
-      partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
-      blb_out <- lapply(partitions, function(i){
-        tmp_dat <- dat[i, ]
-        
-        K_DD <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('D')]))
-        K_VV <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('V')]))
-        K_XX <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('X1', 'X2')]))
-        K_Dd <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('D')]), as.matrix(d_vals))
-        K_Vv <- kernlab::kernelMatrix(rbf, as.matrix(tmp_dat[, c('V')]), as.matrix(rep(v, length(d_vals))))
-        
-        # lambda_values <- 10^seq(-3, 3, length.out = 10)
-        # gcv_gamma <- compute_gcv(tmp_dat$Y, K_DD*K_VV*K_XX, lambda_values)
-        # lambda_1 <- lambda_values[which.min(gcv_gamma)]
-        # 
-        # gcv_mu_x <- compute_gcv(K_VV, K_XX, lambda_values)
-        # lambda_2 <- lambda_values[which.min(gcv_mu_x)]
-        
-        M <- rmultinom(B, size = n, prob = rep(1, b))
-        blb_reps <- lapply(1:B, function(bt){
-          W <- M[, bt]
-          W_sqrt <- sqrt(W)
-          W_diag <- diag(W_sqrt)
-          Y_w <- W*tmp_dat$Y
-          K_DD_w <- W_diag %*% K_DD %*% W_diag
-          K_VV_w <- W_diag %*% K_VV %*% W_diag
-          K_XX_w <- W_diag %*% K_XX %*% W_diag
-          # K_Dd_w <- apply(K_Dd, 2, function(x) x*W)
-          # K_Vv_w <- apply(K_Dd, 2, function(x) x*W)
-          
-          first_inverse_w <- solve(K_DD_w*K_VV_w*K_XX_w + n*full_lambda_1*diag(b))
-          second_inverse_w <- solve(K_VV_w + n*full_lambda_2*diag(b))
-          t(Y_w) %*% (first_inverse_w) %*% (K_Dd*K_Vv*(K_XX_w %*% second_inverse_w) %*% K_Vv)
-        })
-        blb_reps <- do.call(rbind, blb_reps)
-        
-        perc_ci <- apply(blb_reps, 2, boot:::perc.ci)
-        return(data.table(lower_ci = perc_ci[4, ],
-                          upper_ci = perc_ci[5, ],
-                          tr_vals = d_vals,
-                          true_dr = true_dr))
-      })
-      blb_out <- rbindlist(blb_out)
-      blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
-                             upper_ci = mean(upper_ci)), by = c('true_dr', 'tr_vals')]     
-      
-    }, cl = 5)
-    
-    out <- rbindlist(out)
-    out[, `:=`(n = n,
-               gamma = gamma,
-               subsets = subsets,
-               B = B)]
-    out
-  })
-  cblb <- rbindlist(cblb)
-  saveRDS(cblb, file.path(temp_dir, 'blb_coverage_fulllambda.rds'))
-}
-
-cblb[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'subsets', 'gamma')]
-
 
 

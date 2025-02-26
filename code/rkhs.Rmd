@@ -1,0 +1,174 @@
+---
+title: "RKHS"
+author: "Matt Kosko"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(data.table)
+library(ggplot2)
+
+source('/Users/macbookair/Documents/Projects/cblb/code/helper_funcs.R')
+homedir <- '/Users/macbookair/Documents/Projects/cblb'
+
+te <- 0.8
+sigma <- 1
+
+base_nm <- 'svm_dml'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+# full <- readRDS(file.path(temp_dir, 'full_coverage.rds'))
+cblb <- readRDS(file.path(temp_dir, 'coverage.rds'))
+
+```
+
+# ATE
+
+```{r}
+d_vals <- seq(-0.5, 0.5, length.out = 10)
+true_dr <- 1.2*d_vals
+base_nm <- 'rkhs_coverage_ate'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'full_coverage.rds'))
+cblb <- readRDS(file.path(temp_dir, 'blb_coverage_baseline.rds'))
+full_refit <- readRDS(file.path(temp_dir, 'full_coverage_refit.rds'))
+```
+
+```{r}
+cat("Coverage from the full bootstrap")
+full[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'true_dr')]
+cat("Coverage from the CBLB")
+cblb[n==1000, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'subsets', 'gamma')]
+cat("Coverage from the full bootstrap with refitting")
+full_refit[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'true_dr')]
+```
+
+
+# Multiple Lambdas
+
+```{r}
+d_vals <- seq(-0.5, 0.5, length.out = 10)
+true_dr <- 1.2*d_vals
+base_nm <- 'rkhs_coverage_lambda'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+cblb <- readRDS(file.path(temp_dir, 'blb_coverage_baseline.rds'))
+```
+
+```{r}
+cat("Coverage from the CBLB, varying lambdas")
+cblb[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'subsets', 
+                                                                             'gamma', 'lambda')]
+```
+
+
+# Polynomal Kernel
+
+```{r}
+d_vals <- seq(-0.5, 0.5, length.out = 10)
+true_dr <- 1.2*d_vals
+base_nm <- 'rkhs_coverage_poly'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'full_coverage.rds'))
+cblb <- readRDS(file.path(temp_dir, 'blb_coverage_baseline.rds'))
+```
+
+```{r}
+cat("Coverage from the full bootstrap")
+full[, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'true_dr')]
+cat("Coverage from the CBLB")
+cblb[n==1000, .(coverage = mean(lower_ci <= true_dr & upper_ci >= true_dr)), by = c('n', 'B', 'tr_vals', 'subsets', 'gamma')]
+```
+
+# Matrix Comparison
+
+
+```{r}
+d_vals <- seq(-0.5, 0.5, length.out = 10)
+true_dr <- 1.2*d_vals
+base_nm <- 'rkhs_coverage_comparison'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+cblb <- readRDS(file.path(temp_dir, 'comparison.rds'))
+```
+
+## Matrices
+
+```{r}
+reps <- unique(cblb$rep)
+for(r in reps){
+  filt <- cblb[((rep == r) | (rep == 1 & type == 'full')) & (!matrix_type %in% c('first_inverse', 'second_inverse'))]
+  p <- ggplot(filt, aes(x = values, fill = type)) +
+    geom_density(alpha = 0.3) +
+    scale_fill_manual(values = c("blue", "red")) +
+    scale_color_manual(values = c("blue", "red")) +
+    facet_wrap(~ matrix_type) + 
+    theme_minimal() +
+    labs(title = paste0("Overlaid Histogram by Category", ', sub ', r),
+         x = "Value",
+         y = "Count",
+         fill = "Category")
+  print(p)
+}
+
+```
+
+## Inverses
+
+```{r}
+reps <- unique(cblb$rep)
+for(r in reps){
+  filt <- cblb[((rep == r) | (rep == 1 & type == 'full')) & (matrix_type %in% c('first_inverse', 'second_inverse'))]
+  p <- ggplot(filt, aes(x = values, fill = type)) +
+    geom_density(alpha = 0.3) +
+    scale_fill_manual(values = c("blue", "red")) +
+    scale_color_manual(values = c("blue", "red")) +
+    facet_wrap(~ matrix_type) + 
+    theme_minimal() +
+    labs(title = paste0("Overlaid Histogram by Category", ', subset ', r),
+         x = "Value",
+         y = "Count",
+         fill = "Category")
+  print(p)
+}
+
+```
+
+### Inverse Summaries
+
+```{r}
+reps <- unique(cblb$rep)
+for(r in reps){
+  filt <- cblb[((rep == r) | (rep == 1 & type == 'full')) & (matrix_type %in% c('first_inverse', 'second_inverse'))]
+    p <- ggplot(filt, aes(x = type, y = values)) +
+    geom_boxplot(alpha = 0.3) +
+    facet_wrap(~ matrix_type) + 
+    theme_minimal() +
+    labs(title = paste0("Boxplot", ', subset ', r),
+         x = "Type",
+         y = "Values")
+  print(p)
+  print('\n')
+
+}
+```

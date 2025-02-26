@@ -1,0 +1,40 @@
+---
+title: "Optimal Value"
+author: "Matt Kosko"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(data.table)
+
+source('/Users/macbookair/Documents/Projects/cblb/code/helper_funcs.R')
+homedir <- '/Users/macbookair/Documents/Projects/cblb'
+
+optimal_val <- 1.001
+sigma <- 1
+
+base_nm <- 'optimal_outcome'
+dat_path <- 'data'
+
+# Create the temporary directory
+temp_dir <- file.path(homedir, dat_path, paste0(base_nm, '_tmp'))
+
+full <- readRDS(file.path(temp_dir, 'naive_norefit.rds'))
+cblb <- readRDS(file.path(temp_dir, 'disjoint_subsets.rds'))
+
+```
+
+
+```{r}
+cat("Coverage from the CBLB", "\n")
+cblb[, .(mean(lower_ci <= optimal_val & upper_ci >= optimal_val)), by = c('n', 'gamma', 'subsets', 'B')]
+cat("Coverage from the full bootstrap", "\n")
+full[, .(mean(lower_ci <= optimal_val & upper_ci >= optimal_val)), by = c('n', 'type')]
+```
+
+

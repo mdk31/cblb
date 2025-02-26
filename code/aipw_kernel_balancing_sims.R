@@ -1,6 +1,7 @@
 library(data.table)
 library(pbapply)
 library(reticulate)
+library(Rcpp)
 
 kernel_weights <- function(data,degree1,degree2,k1,k2,operator,penal, bootstrap_size=length(data)){
   
@@ -260,7 +261,6 @@ if(file.exists(file.path(temp_dir, 'bootstrap.rds'))){
 
 cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'type')]
 
-
 # DISJOINT----
 hyper_grid <- rbindlist(list(data.table(n = 10000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 10, gamma = 0.75),
                              data.table(n = 10000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 15, gamma = 0.70597),
@@ -342,5 +342,87 @@ if(file.exists(file.path(temp_dir, 'disjoint_subsets.rds'))){
 
 cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')]
 
+
+# DISJOINT W/ NYDSTROM APPROX----
+hyper_grid <- rbindlist(list(data.table(n = 10000, B = 100, prop_form = 'correct', out_form = 'correct', subsets = 10, gamma = 0.75)))
+seq_row <- seq_len(nrow(hyper_grid))
+
+
+
+if(file.exists(file.path(temp_dir, 'disjoint_subsets_osqp.rds'))){
+  cblb <- readRDS(file.path(temp_dir, 'disjoint_subsets_osqp.rds'))
+} else{
+  cblb <- lapply(seq_row, function(i){
+    grid_val <- hyper_grid[i]
+    n <- grid_val$n
+    gamma <- grid_val$gamma
+    b <- floor(n^gamma)
+    part_idx <- seq_len(b)
+    prop_form <- grid_val$prop_form
+    out_form <- grid_val$out_form
+    B <- grid_val$B
+    if(prop_form == 'correct'){
+      prop_formula <- c('X1', 'X2')
+    } else{
+      prop_formula <- c('Z1', 'Z2')
+    }
+    if(out_form == 'correct'){
+      out_formula <- c('Tr', 'X1', 'X2')
+    } else{
+      out_formula <- c('Tr', 'Z1', 'Z2')
+    }
+    subsets <- grid_val$subsets
+    
+    out <- pblapply(seq_len(replications), function(rp){
+      set.seed(rp)
+      dat <- kangschafer3(n = n, te = te, sigma = sigma, beta_overlap = 0.5)
+      n0 <- sum(1-dat$Tr)
+      partitions <- make_partition(n = n, subsets = subsets, b = b, disjoint = TRUE)
+      
+      blb_out <- lapply(partitions, function(i){
+        tmp_dat <- dat[i]
+        Yc <- tmp_dat$y[tmp_dat$Tr == 0]
+        output <- osqp_kernel_sbw(X = tmp_dat[, c('X1', 'X2')],
+                                  A = tmp_dat$Tr,
+                                  Y = tmp_dat$y,
+                                  delta.v=1e-4,
+                                  kernel.approximation = FALSE,
+                                  c = 100)
+        M <- rmultinom(n = B, size = n0, prob = rep(1, length(Yc)))
+        blb_reps <- sapply(seq_len(B), function(bt){
+          sum(M[, bt]*(Yc*output[[1]]$w))*(n0/length(Yc))^(-1)
+        })
+
+        
+        perc_ci <- boot:::perc.ci(blb_reps)
+        return(data.table(lower_ci = perc_ci[4],
+                          upper_ci = perc_ci[5],
+                          estim = mean(blb_reps),
+                          se = sd(blb_reps)))
+      })
+      
+      blb_out <- rbindlist(blb_out)
+      blb_out <- blb_out[, .(lower_ci = mean(lower_ci),
+                             upper_ci = mean(upper_ci),
+                             estim = mean(estim),
+                             se = mean(se))]
+      browser()
+      blb_out
+    }, cl = 1)
+    
+    out <- rbindlist(out)
+    out[, `:=`(n = n,
+               gamma = gamma,
+               subsets = subsets,
+               prop_form = prop_form,
+               out_form = out_form,
+               B = B)]
+    out
+  })
+  cblb <- rbindlist(cblb)
+  saveRDS(cblb, file.path(temp_dir, 'disjoint_subsets_osqp.rds'))
+}
+
+cblb[, .(mean(lower_ci <= te & upper_ci >= te)), by = c('n', 'gamma', 'subsets', 'out_form', 'prop_form', 'B')]
 
 
